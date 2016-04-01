@@ -19,9 +19,49 @@
 
 from django.conf.urls import url, include
 
-from rest_framework import routers
+from patchwork.models import Project
 
-router = routers.DefaultRouter()
+from rest_framework import permissions
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.routers import DefaultRouter
+from rest_framework.serializers import ModelSerializer
+from rest_framework.viewsets import ModelViewSet
+
+
+class PageSizePagination(PageNumberPagination):
+    """Overide base class to enable the "page_size" query parameter."""
+    page_size = 30
+    page_size_query_param = 'page_size'
+
+
+class PatchworkPermission(permissions.BasePermission):
+    """This permission works for Project and Patch model objects"""
+    def has_permission(self, request, view):
+        if request.method in ('POST', 'DELETE'):
+            return False
+        return super(PatchworkPermission, self).has_permission(request, view)
+
+    def has_object_permission(self, request, view, obj):
+        # read only for everyone
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return obj.is_editable(request.user)
+
+
+class ProjectSerializer(ModelSerializer):
+    class Meta:
+        model = Project
+
+
+class ProjectViewSet(ModelViewSet):
+    permission_classes = (PatchworkPermission,)
+    queryset = Project.objects.all()
+    serializer_class = ProjectSerializer
+    pagination_class = PageSizePagination
+
+
+router = DefaultRouter()
+router.register('projects', ProjectViewSet, 'project')
 
 urlpatterns = [
     url(r'^api/1.0/', include(router.urls)),
