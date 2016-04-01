@@ -19,7 +19,7 @@
 
 from django.conf.urls import url, include
 
-from patchwork.models import Project
+from patchwork.models import Person, Project
 
 from rest_framework import permissions
 from rest_framework.pagination import PageNumberPagination
@@ -48,6 +48,12 @@ class PatchworkPermission(permissions.BasePermission):
         return obj.is_editable(request.user)
 
 
+class AuthenticatedReadOnly(permissions.BasePermission):
+    def has_permission(self, request, view):
+        authenticated = request.user.is_authenticated()
+        return authenticated and request.method in permissions.SAFE_METHODS
+
+
 class PatchworkViewSet(ModelViewSet):
     pagination_class = PageSizePagination
 
@@ -62,12 +68,18 @@ def create_model_serializer(model_class):
     return PatchworkSerializer
 
 
+class PeopleViewSet(PatchworkViewSet):
+    permission_classes = (AuthenticatedReadOnly,)
+    serializer_class = create_model_serializer(Person)
+
+
 class ProjectViewSet(PatchworkViewSet):
     permission_classes = (PatchworkPermission,)
     serializer_class = create_model_serializer(Project)
 
 
 router = DefaultRouter()
+router.register('people', PeopleViewSet, 'person')
 router.register('projects', ProjectViewSet, 'project')
 
 urlpatterns = [
