@@ -48,16 +48,23 @@ class PatchworkPermission(permissions.BasePermission):
         return obj.is_editable(request.user)
 
 
-class ProjectSerializer(ModelSerializer):
-    class Meta:
-        model = Project
-
-
-class ProjectViewSet(ModelViewSet):
-    permission_classes = (PatchworkPermission,)
-    queryset = Project.objects.all()
-    serializer_class = ProjectSerializer
+class PatchworkViewSet(ModelViewSet):
     pagination_class = PageSizePagination
+
+    def get_queryset(self):
+        return self.serializer_class.Meta.model.objects.all()
+
+
+def create_model_serializer(model_class):
+    class PatchworkSerializer(ModelSerializer):
+        class Meta:
+            model = model_class
+    return PatchworkSerializer
+
+
+class ProjectViewSet(PatchworkViewSet):
+    permission_classes = (PatchworkPermission,)
+    serializer_class = create_model_serializer(Project)
 
 
 router = DefaultRouter()
