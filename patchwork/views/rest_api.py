@@ -19,7 +19,7 @@
 
 from django.conf.urls import url, include
 
-from patchwork.models import Person, Project
+from patchwork.models import Patch, Person, Project
 
 from rest_framework import permissions
 from rest_framework.pagination import PageNumberPagination
@@ -61,11 +61,19 @@ class PatchworkViewSet(ModelViewSet):
         return self.serializer_class.Meta.model.objects.all()
 
 
-def create_model_serializer(model_class):
+def create_model_serializer(model_class, read_only=None):
     class PatchworkSerializer(ModelSerializer):
         class Meta:
             model = model_class
+            read_only_fields = read_only
     return PatchworkSerializer
+
+
+class PatchViewSet(PatchworkViewSet):
+    permission_classes = (PatchworkPermission,)
+    serializer_class = create_model_serializer(
+        Patch, ('project', 'name', 'date', 'submitter', 'diff', 'content',
+                'hash', 'msgid'))
 
 
 class PeopleViewSet(PatchworkViewSet):
@@ -79,6 +87,7 @@ class ProjectViewSet(PatchworkViewSet):
 
 
 router = DefaultRouter()
+router.register('patches', PatchViewSet, 'patch')
 router.register('people', PeopleViewSet, 'person')
 router.register('projects', ProjectViewSet, 'project')
 

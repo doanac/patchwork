@@ -24,8 +24,9 @@ from django.conf import settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from patchwork.models import Project
-from patchwork.tests.utils import defaults, create_maintainer, create_user
+from patchwork.models import Patch, Project
+from patchwork.tests.utils import (
+    defaults, create_maintainer, create_user, create_patches, make_msgid)
 
 
 @unittest.skipUnless(settings.ENABLE_REST_API, 'requires ENABLE_REST_API')
@@ -142,3 +143,96 @@ class TestPersonAPI(APITestCase):
 
         resp = self.client.post('/api/1.0/people/', {'email': 'foo@f.com'})
         self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+
+
+@unittest.skipUnless(settings.ENABLE_REST_API, 'requires ENABLE_REST_API')
+class TestPatchAPI(APITestCase):
+    fixtures = ['default_states']
+
+    def test_list_simple(self):
+        """Validate we can list a patch."""
+        patches = create_patches()
+        resp = self.client.get('/api/1.0/patches/')
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+        self.assertEqual(1, resp.data['count'])
+        patch = resp.data['results'][0]
+        self.assertEqual(patches[0].name, patch['name'])
+
+    def test_get(self):
+        """Validate we can get a specific project."""
+        patches = create_patches()
+        resp = self.client.get('/api/1.0/patches/%d/' % patches[0].id)
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+        self.assertEqual(patches[0].name, resp.data['name'])
+        self.assertEqual(patches[0].project.id, resp.data['project'])
+        self.assertEqual(patches[0].msgid, resp.data['msgid'])
+        self.assertEqual(patches[0].diff, resp.data['diff'])
+        self.assertEqual(patches[0].submitter.id, resp.data['submitter'])
+        self.assertEqual(patches[0].state.id, resp.data['state'])
+
+    def test_anonymous_writes(self):
+        """Ensure anonymous "write" operations are rejected."""
+        patches = create_patches()
+        patch_url = '/api/1.0/patches/%d/' % patches[0].id
+        resp = self.client.get(patch_url)
+        patch = resp.data
+        patch['msgid'] = 'foo'
+        patch['name'] = 'this will should fail'
+
+        # create
+        resp = self.client.post('/api/1.0/patches/', patch)
+        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+        # update
+        resp = self.client.patch(patch_url, {'name': 'foo'})
+        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+        # delete
+        resp = self.client.delete(patch_url)
+        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+
+    def test_create(self):
+        """Ensure creations are rejected."""
+        create_patches()
+        patch = {
+            'project': defaults.project.id,
+            'submitter': defaults.patch_author_person.id,
+            'msgid': make_msgid(),
+            'name': 'test-create-patch',
+            'diff': 'patch diff',
+        }
+
+        user = create_maintainer(defaults.project)
+        user.is_superuser = True
+        user.save()
+        self.client.force_authenticate(user=user)
+        resp = self.client.post('/api/1.0/patches/', patch)
+        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+
+    def test_update(self):
+        """Ensure updates can be performed maintainers."""
+        patches = create_patches()
+
+        # A maintainer can update
+        user = create_maintainer(defaults.project)
+        self.client.force_authenticate(user=user)
+        resp = self.client.patch(
+            '/api/1.0/patches/%d/' % patches[0].id, {'state': 2})
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+
+        # A normal user can't
+        user = create_user()
+        self.client.force_authenticate(user=user)
+        resp = self.client.patch(
+            '/api/1.0/patches/%d/' % patches[0].id, {'state': 2})
+        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+
+    def test_delete(self):
+        """Ensure deletions are rejected."""
+        patches = create_patches()
+
+        user = create_maintainer(defaults.project)
+        user.is_superuser = True
+        user.save()
+        self.client.force_authenticate(user=user)
+        resp = self.client.delete('/api/1.0/patches/%d/' % patches[0].id)
+        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+        self.assertEqual(1, Patch.objects.all().count())
