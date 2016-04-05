@@ -19,13 +19,18 @@
 
 from django.conf.urls import url, include
 
-from patchwork.models import Patch, Person, Project
+from patchwork.models import Check, Patch, Person, Project
 
 from rest_framework import permissions
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.response import Response
 from rest_framework.routers import DefaultRouter
-from rest_framework.serializers import ModelSerializer
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.serializers import (
+    CurrentUserDefault, HiddenField, ModelSerializer, PrimaryKeyRelatedField)
+from rest_framework.viewsets import GenericViewSet, ModelViewSet
+
+from rest_framework_nested.routers import NestedSimpleRouter
 
 
 class PageSizePagination(PageNumberPagination):
@@ -86,11 +91,67 @@ class ProjectViewSet(PatchworkViewSet):
     serializer_class = create_model_serializer(Project)
 
 
+class CurrentPatchDefault(object):
+    def set_context(self, serializer_field):
+        self.patch = serializer_field.context['request'].patch
+
+    def __call__(self):
+        return self.patch
+
+
+class ChecksSerializer(ModelSerializer):
+    class Meta:
+        model = Check
+    user = PrimaryKeyRelatedField(read_only=True, default=CurrentUserDefault())
+    patch = HiddenField(default=CurrentPatchDefault())
+
+
+class ChecksViewSet(PatchworkViewSet):
+    serializer_class = ChecksSerializer
+
+    def not_allowed(self, request, **kwargs):
+        raise PermissionDenied()
+
+    update = not_allowed
+    partial_update = not_allowed
+    destroy = not_allowed
+
+    def create(self, request, patch_pk):
+        p = Patch.objects.get(id=patch_pk)
+        if not p.is_editable(request.user):
+            raise PermissionDenied()
+        request.patch = p
+        return super(ChecksViewSet, self).create(request)
+
+    def list(self, request, patch_pk):
+        queryset = self.filter_queryset(self.get_queryset())
+        queryset = queryset.filter(patch=patch_pk)
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class CheckViewSet(GenericViewSet):
+    def list(self, request, patch_pk):
+        state = Patch.objects.get(id=patch_pk).combined_check_state
+        return Response({'state': state})
+
+
 router = DefaultRouter()
 router.register('patches', PatchViewSet, 'patch')
 router.register('people', PeopleViewSet, 'person')
 router.register('projects', ProjectViewSet, 'project')
 
+patches_router = NestedSimpleRouter(router, r'patches', lookup='patch')
+patches_router.register(r'checks', ChecksViewSet, base_name='patch-checks')
+patches_router.register(r'check', CheckViewSet, base_name='patch-check')
+
 urlpatterns = [
     url(r'^api/1.0/', include(router.urls)),
+    url(r'^api/1.0/', include(patches_router.urls)),
 ]

@@ -24,7 +24,7 @@ from django.conf import settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from patchwork.models import Patch, Project
+from patchwork.models import Check, Patch, Project
 from patchwork.tests.utils import (
     defaults, create_maintainer, create_user, create_patches, make_msgid)
 
@@ -236,3 +236,83 @@ class TestPatchAPI(APITestCase):
         resp = self.client.delete('/api/1.0/patches/%d/' % patches[0].id)
         self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
         self.assertEqual(1, Patch.objects.all().count())
+
+
+@unittest.skipUnless(settings.ENABLE_REST_API, 'requires ENABLE_REST_API')
+class TestCheckAPI(APITestCase):
+    fixtures = ['default_states']
+
+    def setUp(self):
+        super(TestCheckAPI, self).setUp()
+        self.patch = create_patches()[0]
+        self.urlbase = '/api/1.0/patches/%d/checks/' % self.patch.id
+        defaults.project.save()
+        self.user = create_maintainer(defaults.project)
+
+    def create_check(self):
+        return Check.objects.create(patch=self.patch, user=self.user,
+                                    state=Check.STATE_WARNING, target_url='t',
+                                    description='d', context='c')
+
+    def test_list_simple(self):
+        """Validate we can list checks on a patch."""
+        resp = self.client.get(self.urlbase)
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+        self.assertEqual(0, resp.data['count'])
+
+        c = self.create_check()
+        resp = self.client.get(self.urlbase)
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+        self.assertEqual(1, resp.data['count'])
+        check = resp.data['results'][0]
+        self.assertEqual(c.state, check['state'])
+        self.assertEqual(c.target_url, check['target_url'])
+        self.assertEqual(c.context, check['context'])
+        self.assertEqual(c.description, check['description'])
+
+    def test_get(self):
+        """Validate we can get a specific check."""
+        c = self.create_check()
+        resp = self.client.get(self.urlbase + str(c.id) + '/')
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+        self.assertEqual(c.target_url, resp.data['target_url'])
+
+        # and we can get the combined check status
+        resp = self.client.get('/api/1.0/patches/%d/check/' % self.patch.id)
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+        self.assertEqual(c.state, resp.data['state'])
+
+    def test_update_delete(self):
+        """Ensure updates and deletes aren't allowed"""
+        c = self.create_check()
+
+        self.user.is_superuser = True
+        self.user.save()
+        self.client.force_authenticate(user=self.user)
+
+        # update
+        resp = self.client.patch(
+            self.urlbase + str(c.id) + '/', {'target_url': 'fail'})
+        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+        # delete
+        resp = self.client.delete(self.urlbase + str(c.id) + '/')
+        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
+
+    def test_create(self):
+        """Ensure creations can be performed by user of patch."""
+        check = {
+            'state': Check.STATE_SUCCESS,
+            'target_url': 'http://t.co',
+            'description': 'description',
+            'context': 'context',
+        }
+
+        self.client.force_authenticate(user=self.user)
+        resp = self.client.post(self.urlbase, check)
+        self.assertEqual(status.HTTP_201_CREATED, resp.status_code)
+        self.assertEqual(1, Check.objects.all().count())
+
+        user = create_user()
+        self.client.force_authenticate(user=user)
+        resp = self.client.post(self.urlbase, check)
+        self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
