@@ -20,6 +20,7 @@
 from django.conf.urls import url, include
 
 from patchwork.models import Check, Patch, Person, Project
+from patchwork.views.patch import mbox
 
 from rest_framework import permissions
 from rest_framework.exceptions import PermissionDenied
@@ -142,6 +143,11 @@ class CheckViewSet(GenericViewSet):
         return Response({'state': state})
 
 
+class MboxViewSet(GenericViewSet):
+    def list(self, request, patch_pk):
+        return mbox(request, patch_pk)
+
+
 router = DefaultRouter()
 router.register('patches', PatchViewSet, 'patch')
 router.register('people', PeopleViewSet, 'person')
@@ -150,6 +156,7 @@ router.register('projects', ProjectViewSet, 'project')
 patches_router = NestedSimpleRouter(router, r'patches', lookup='patch')
 patches_router.register(r'checks', ChecksViewSet, base_name='patch-checks')
 patches_router.register(r'check', CheckViewSet, base_name='patch-check')
+patches_router.register(r'mbox', MboxViewSet, base_name='patch-mbox')
 
 urlpatterns = [
     url(r'^api/1.0/', include(router.urls)),

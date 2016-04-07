@@ -237,6 +237,14 @@ class TestPatchAPI(APITestCase):
         self.assertEqual(status.HTTP_403_FORBIDDEN, resp.status_code)
         self.assertEqual(1, Patch.objects.all().count())
 
+    def test_mbox(self):
+        """Ensure we can download the raw mbox version of the patch."""
+        patches = create_patches()
+        resp = self.client.get('/api/1.0/patches/%d/mbox/' % patches[0].id)
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+        self.assertIn('\nMIME-Version:', resp.content)
+        self.assertIn(patches[0].diff, resp.content)
+
 
 @unittest.skipUnless(settings.ENABLE_REST_API, 'requires ENABLE_REST_API')
 class TestCheckAPI(APITestCase):
