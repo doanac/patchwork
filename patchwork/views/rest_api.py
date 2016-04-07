@@ -63,8 +63,25 @@ class AuthenticatedReadOnly(permissions.BasePermission):
 class PatchworkViewSet(ModelViewSet):
     pagination_class = PageSizePagination
 
+    # a dict of the request-query-param -> django ORM query parameter
+    query_filters = {}
+
     def get_queryset(self):
-        return self.serializer_class.Meta.model.objects.all()
+        qs = self.serializer_class.Meta.model.objects.all()
+        filters = {}
+        for param, val in self.request.query_params.items():
+            name = self.query_filters.get(param)
+            if name:
+                filters[name] = val
+        return qs.filter(**filters)
+
+    def options(self, request, *args, **kwargs):
+        # add our query filters to make the "options" command a little more
+        # helpful.
+        resp = super(PatchworkViewSet, self).options(request, *args, **kwargs)
+        if self.query_filters:
+            resp.data['query_filters'] = self.query_filters.keys()
+        return resp
 
 
 def create_model_serializer(model_class, read_only=None):
@@ -76,10 +93,29 @@ def create_model_serializer(model_class, read_only=None):
 
 
 class PatchViewSet(PatchworkViewSet):
+    """Listings support the following query filters:
+        * project=<project-name>
+        * since=<YYYY-MM-DDTHH:MM:SS.mm>
+        * until=<YYYY-MM-DDTHH:MM:SS.mm>
+        * state=<state-name>
+        * submitter=<name>
+        * delegate=<name>
+
+       eg: GET /api/1.0/patches/?project=p&since=2016-01-01&submitter=User+Name
+    """
     permission_classes = (PatchworkPermission,)
     serializer_class = create_model_serializer(
         Patch, ('project', 'name', 'date', 'submitter', 'diff', 'content',
                 'hash', 'msgid'))
+
+    query_filters = {
+        'project': 'project__name',
+        'submitter': 'submitter__name',
+        'delegate': 'delegate__name',
+        'state': 'state__name',
+        'since': 'date__gt',
+        'until': 'date__lt',
+    }
 
 
 class PeopleViewSet(PatchworkViewSet):

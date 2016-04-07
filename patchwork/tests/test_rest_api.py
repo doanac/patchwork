@@ -17,6 +17,7 @@
 # along with Patchwork; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
+import datetime
 import unittest
 
 from django.conf import settings
@@ -157,6 +158,29 @@ class TestPatchAPI(APITestCase):
         self.assertEqual(1, resp.data['count'])
         patch = resp.data['results'][0]
         self.assertEqual(patches[0].name, patch['name'])
+
+    def test_query_filters(self):
+        """Test out our filtering support."""
+        patches = create_patches(4)
+        project = Project.objects.create(
+            linkname='foo', name='Foo', listid='foo.example.com')
+        patches[0].project = project
+        patches[0].save()
+        resp = self.client.get('/api/1.0/patches/?project=Foo')
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+        self.assertEqual(1, resp.data['count'])
+        self.assertEqual(patches[0].id, resp.data['results'][0]['id'])
+
+        ts = datetime.datetime.now().isoformat()
+        new_patches = create_patches(2)
+
+        resp = self.client.get('/api/1.0/patches/?until=%s' % ts)
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+        self.assertEqual(len(patches), resp.data['count'])
+
+        resp = self.client.get('/api/1.0/patches/?since=%s' % ts)
+        self.assertEqual(status.HTTP_200_OK, resp.status_code)
+        self.assertEqual(len(new_patches), resp.data['count'])
 
     def test_get(self):
         """Validate we can get a specific project."""
